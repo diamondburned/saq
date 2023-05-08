@@ -23,7 +23,7 @@ func NewPubsub[T any]() *Pubsub[T] {
 
 // Subscribe subscribes to the pubsub.
 func (p *Pubsub[T]) Subscribe() <-chan T {
-	ch := make(chan T, 1)
+	ch := make(chan T)
 	p.subs.Store((<-chan T)(ch), ch)
 	return ch
 }

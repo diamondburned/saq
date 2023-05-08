@@ -20,13 +20,19 @@ saq -- bash -c 'make build && ./build/main --http localhost:8081'
 **Note**: `go run` does not propagate signals to the child process, so you
 should not use `go run` with `saq`. See https://github.com/golang/go/issues/40467.
 
-## Unimplemented Features
+## How it works
 
-Right now, `saq` doesn't detect if the server is ready to accept connections,
-which means the browser may reload before the server is ready.
+`saq` acts as a reverse proxy. It works as follows:
 
-This should be easily fixable with something like a `HEAD` request to the server
-to check if it's ready. For now, it's unimplemented.
+1. It injects a script into the HTML response that `fetch`es an endpoint that
+   blocks until a file change is detected.
+2. When a file change is detected, the server process is restarted, which `saq`
+   then tries to connect by sending a `HEAD` request to the server.
+3. Once the server is up, the browser is reloaded.
+
+## Supported Platforms
+
+`saq` only works on Linux due to its dependency on [illarion/gonotify](https://github.com/illarion/gonotify).
 
 ## Who made the name?
 

@@ -2,31 +2,34 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/illarion/gonotify/v2"
 	gitignore "github.com/sabhiram/go-gitignore"
 )
 
 // Observed is a set of paths to observe.
 type Observed struct {
-	Paths     []string
+	Root      string
 	Excludes  []string
 	Gitignore string
 }
 
 // Observer observes a set of paths for changes.
 type Observer struct {
-	Subscriber[fsnotify.Event]
+	Subscriber[struct{}]
 
 	obs    Observed
-	pubsub *Pubsub[fsnotify.Event]
+	pubsub *Pubsub[struct{}]
 }
 
 // NewObserver creates a new observer for the given paths.
 func NewObserver(observed Observed) *Observer {
-	pubsub := NewPubsub[fsnotify.Event]()
+	pubsub := NewPubsub[struct{}]()
 	return &Observer{
 		Subscriber: pubsub,
 		obs:        observed,
@@ -34,23 +37,15 @@ func NewObserver(observed Observed) *Observer {
 	}
 }
 
+const wmask = 0 |
+	gonotify.IN_CREATE | gonotify.IN_DELETE | gonotify.IN_MODIFY |
+	gonotify.IN_MOVED_FROM | gonotify.IN_MOVED_TO
+
 // Start starts the observer until the context is canceled.
 func (o *Observer) Start(ctx context.Context) error {
-	watcher, err := fsnotify.NewWatcher()
+	watcher, err := gonotify.NewDirWatcher(ctx, wmask, o.obs.Root)
 	if err != nil {
 		return err
-	}
-
-	for _, path := range o.obs.Paths {
-		if err := watcher.Add(path); err != nil {
-			return fmt.Errorf("failed to watch path %q: %v", path, err)
-		}
-	}
-
-	for _, path := range o.obs.Excludes {
-		if err := watcher.Remove(path); err != nil {
-			return fmt.Errorf("failed to exclude path %q: %v", path, err)
-		}
 	}
 
 	var ignore *gitignore.GitIgnore
@@ -61,19 +56,63 @@ func (o *Observer) Start(ctx context.Context) error {
 		}
 	}
 
+eventLoop:
 	for {
 		select {
 		case <-ctx.Done():
-			if err := watcher.Close(); err != nil {
-				return fmt.Errorf("failed to close watcher: %w", err)
-			}
 			return ctx.Err()
-		case ev := <-watcher.Events:
+
+		case ev := <-watcher.C:
+			if ev.Eof {
+				return fmt.Errorf("watcher closed")
+			}
+
 			if ignore != nil && ignore.MatchesPath(ev.Name) {
 				continue
 			}
-			log.Print("file reloaded: ", ev.Name, ": ", ev.Op)
-			o.pubsub.Publish(ev)
+
+			for _, excl := range o.obs.Excludes {
+				if first, rest := popFirstPart(excl); first == "." {
+					if strings.HasPrefix(ev.Name, rest) {
+						log.Printf("excluded %q on rule %q", ev, excl)
+						continue eventLoop
+					}
+					continue
+				}
+
+				match, _ := filepath.Match(excl, ev.Name)
+				if match {
+					log.Printf("excluded %q on rule %q", ev, excl)
+					continue eventLoop
+				}
+			}
+
+			log.Println("file reloaded:", ev)
+			o.pubsub.Publish(struct{}{})
+
 		}
 	}
+}
+
+func checkValidExclude(excl string) error {
+	if first, rest := popFirstPart(excl); first == "." {
+		if rest == "" {
+			return errors.New("cannot exclude root")
+		}
+		return nil
+	}
+
+	if _, err := filepath.Match(excl, ""); err != nil {
+		return fmt.Errorf("invalid exclude pattern %q: %w", excl, err)
+	}
+
+	return nil
+}
+
+func popFirstPart(path string) (first, rest string) {
+	first, rest, ok := strings.Cut(path, string(filepath.Separator))
+	if !ok {
+		return path, ""
+	}
+	return first, rest
 }

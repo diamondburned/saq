@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/spf13/pflag"
 	"golang.org/x/sync/errgroup"
@@ -27,8 +29,9 @@ var (
 	sourceURL     string   = "http://localhost:8081"
 	targetAddr    string   = "localhost:8080"
 	gitignoreFile string   = ".gitignore"
-	includeDirs   []string = []string{"./..."}
-	excludeDirs   []string = []string{".git"}
+	includeDir    string   = "."
+	excludeDirs   []string = []string{"./.git", "./.direnv", "*.tmpl"}
+	verbose       bool     = false
 )
 
 func main() {
@@ -41,11 +44,12 @@ func main() {
 		pflag.PrintDefaults()
 	}
 
-	pflag.StringSliceVarP(&includeDirs, "include", "i", includeDirs, "include directory")
-	pflag.StringSliceVarP(&excludeDirs, "exclude", "x", excludeDirs, "exclude directory")
+	pflag.StringVarP(&includeDir, "include", "i", includeDir, "include directory")
+	pflag.StringSliceVarP(&excludeDirs, "exclude", "x", excludeDirs, "exclude directories/paths/globs")
 	pflag.StringVarP(&sourceURL, "source", "s", sourceURL, "source URL of the upstream server")
 	pflag.StringVarP(&targetAddr, "target", "t", targetAddr, "target address to listen on")
 	pflag.StringVar(&gitignoreFile, "gitignore", gitignoreFile, "gitignore file to use, empty to disable")
+	pflag.BoolVarP(&verbose, "verbose", "v", verbose, "verbose logging")
 	pflag.Parse()
 
 	if pflag.NArg() == 0 {
@@ -53,15 +57,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	for _, excl := range excludeDirs {
+		if err := checkValidExclude(excl); err != nil {
+			log.Fatalln("invalid --exclude:", err)
+		}
+	}
+
 	src, err := url.Parse(sourceURL)
 	if err != nil {
 		log.Fatalln("invalid --source URL:", err)
 	}
 
+	if !verbose {
+		log.SetOutput(io.Discard)
+	}
+
 	wg, ctx := errgroup.WithContext(ctx)
 
 	observer := NewObserver(Observed{
-		Paths:     includeDirs,
+		Root:      includeDir,
 		Excludes:  excludeDirs,
 		Gitignore: gitignoreFile,
 	})
@@ -74,6 +88,8 @@ func main() {
 		return runner.Start(ctx)
 	})
 
+	serverAlive := NewPubsub[struct{}]()
+
 	wg.Go(func() error {
 		ch := observer.Subscribe()
 		defer observer.Unsubscribe(ch)
@@ -84,14 +100,22 @@ func main() {
 				return nil
 			case <-ch:
 				runner.Restart()
+
+				if err := pingHTTPUntilAlive(ctx, sourceURL); err != nil {
+					log.Println("cannot ping source server:", err)
+					continue
+				}
+
+				log.Println("signaling server to refresh")
+				serverAlive.Publish(struct{}{})
 			}
 		}
 	})
 
 	r := http.NewServeMux()
 	r.HandleFunc("/__refresh", func(w http.ResponseWriter, r *http.Request) {
-		ch := runner.Subscribe()
-		defer runner.Unsubscribe(ch)
+		ch := serverAlive.Subscribe()
+		defer serverAlive.Unsubscribe(ch)
 
 		select {
 		case <-r.Context().Done():
@@ -118,5 +142,32 @@ func main() {
 func assert(cond bool, msg string) {
 	if !cond {
 		log.Fatalln(msg)
+	}
+}
+
+func pingHTTPUntilAlive(ctx context.Context, addr string) error {
+	const retryDelay = 100 * time.Millisecond
+
+	timer := time.NewTimer(retryDelay)
+	defer timer.Stop()
+
+	for {
+		r, err := http.Head(sourceURL)
+		if err == nil {
+			r.Body.Close()
+			log.Println("source server is alive")
+			return nil
+		}
+
+		log.Println("cannot ping source server:", err)
+		log.Println("retrying in", retryDelay)
+
+		timer.Reset(retryDelay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			// ok
+		}
 	}
 }

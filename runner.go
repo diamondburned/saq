@@ -101,7 +101,7 @@ func stopCommand(cmd *exec.Cmd) {
 	go func() { wait <- cmd.Wait() }()
 
 	cmd.Process.Signal(os.Interrupt)
-	log.Println("sent SIGINT, waiting 5s")
+	log.Println("sent SIGINT, waiting 2s")
 
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -111,6 +111,7 @@ func stopCommand(cmd *exec.Cmd) {
 		log.Println("timeout waiting for process to exit, killing...")
 		cmd.Process.Kill()
 	case <-wait:
+		log.Println("process exited")
 		return
 	}
 
