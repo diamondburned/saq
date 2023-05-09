@@ -36,4 +36,4 @@ should not use `go run` with `saq`. See https://github.com/golang/go/issues/4046
 
 ## Who made the name?
 
-@FreezeSnail
+[@FreezingSnail](https://github.com/freezingsnail)
