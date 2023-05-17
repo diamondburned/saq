@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/diamondburned/ghproxy/htmlmut"
@@ -50,13 +51,18 @@ func NewReverseProxy(target url.URL, htmlMutator htmlmut.MutateFunc) *ReversePro
 // with the previously given targetURL, the server will 301 redirect that to a
 // request with the path trimmed.
 func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cWriter := rp.cookieInterceptor.NewWriter(w)
-	htmlMut := rp.htmlMutator.NewWriter(cWriter)
-	r.Host = rp.targetURL.Host
+	switch filepath.Ext(r.URL.Path) {
+	case ".html", "":
+		cWriter := rp.cookieInterceptor.NewWriter(w)
+		htmlMut := rp.htmlMutator.NewWriter(cWriter)
+		r.Host = rp.targetURL.Host
 
-	rp.ReverseProxy.ServeHTTP(htmlMut, r)
+		rp.ReverseProxy.ServeHTTP(htmlMut, r)
 
-	if err := htmlMut.ApplyHTML(); err != nil {
-		writeBigError(w, err)
+		if err := htmlMut.ApplyHTML(); err != nil {
+			writeBigError(w, err)
+		}
+	default:
+		rp.ReverseProxy.ServeHTTP(w, r)
 	}
 }

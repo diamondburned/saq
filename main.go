@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -9,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"time"
 
 	"github.com/spf13/pflag"
 	"golang.org/x/sync/errgroup"
@@ -88,40 +88,47 @@ func main() {
 		return runner.Start(ctx)
 	})
 
-	serverAlive := NewPubsub[struct{}]()
+	serverMon := NewHTTPMonitor(sourceURL)
+	wg.Go(func() error {
+		return serverMon.Start(ctx)
+	})
 
 	wg.Go(func() error {
-		ch := observer.Subscribe()
-		defer observer.Unsubscribe(ch)
+		observeCh := observer.Subscribe()
+		defer observer.Unsubscribe(observeCh)
+
+		runnerCh := runner.Subscribe()
+		defer runner.Unsubscribe(runnerCh)
 
 		for {
 			select {
 			case <-ctx.Done():
-				return nil
-			case <-ch:
+				return ctx.Err()
+			case <-observeCh:
 				runner.Restart()
-
-				if err := pingHTTPUntilAlive(ctx, sourceURL); err != nil {
-					log.Println("cannot ping source server:", err)
-					continue
-				}
-
-				log.Println("signaling server to refresh")
-				serverAlive.Publish(struct{}{})
+			case <-runnerCh:
+				serverMon.RefreshUntilState(ctx, HTTPStateAlive)
 			}
 		}
 	})
 
 	r := http.NewServeMux()
 	r.HandleFunc("/__refresh", func(w http.ResponseWriter, r *http.Request) {
-		ch := serverAlive.Subscribe()
-		defer serverAlive.Unsubscribe(ch)
+		ch := serverMon.Subscribe()
+		defer serverMon.Unsubscribe(ch)
 
-		select {
-		case <-r.Context().Done():
-			return
-		case <-ch:
-			w.WriteHeader(http.StatusNoContent)
+		for {
+			select {
+			case <-r.Context().Done():
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			case state := <-ch:
+				if state == HTTPStateAlive {
+					log.Println("server is alive, refreshing page")
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+			}
 		}
 	})
 
@@ -134,7 +141,7 @@ func main() {
 		return hserve.ListenAndServe(ctx, targetAddr, r)
 	})
 
-	if err := wg.Wait(); err != nil {
+	if err := wg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalln("error:", err)
 	}
 }
@@ -142,32 +149,5 @@ func main() {
 func assert(cond bool, msg string) {
 	if !cond {
 		log.Fatalln(msg)
-	}
-}
-
-func pingHTTPUntilAlive(ctx context.Context, addr string) error {
-	const retryDelay = 100 * time.Millisecond
-
-	timer := time.NewTimer(retryDelay)
-	defer timer.Stop()
-
-	for {
-		r, err := http.Head(sourceURL)
-		if err == nil {
-			r.Body.Close()
-			log.Println("source server is alive")
-			return nil
-		}
-
-		log.Println("cannot ping source server:", err)
-		log.Println("retrying in", retryDelay)
-
-		timer.Reset(retryDelay)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			// ok
-		}
 	}
 }

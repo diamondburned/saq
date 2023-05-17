@@ -97,11 +97,16 @@ func stopCommand(cmd *exec.Cmd) {
 		return
 	}
 
-	wait := make(chan error)
+	wait := make(chan error, 1)
 	go func() { wait <- cmd.Wait() }()
 
-	cmd.Process.Signal(os.Interrupt)
-	log.Println("sent SIGINT, waiting 2s")
+	select {
+	case <-wait:
+		return
+	default:
+		cmd.Process.Signal(os.Interrupt)
+		log.Println("sent SIGINT, waiting 2s")
+	}
 
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
