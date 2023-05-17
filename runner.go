@@ -49,14 +49,11 @@ func (s *CommandRunner) Start(ctx context.Context) error {
 		case <-s.restart:
 		}
 
+		log.Println("command runner received restart")
+
 		if cmd != nil {
 			stopCommand(cmd)
 			cmd = nil
-		}
-
-		// debounce
-		if err := sleep(ctx, 500*time.Millisecond); err != nil {
-			return err
 		}
 
 		log.Printf("starting command %q", s.args)
