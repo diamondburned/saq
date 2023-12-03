@@ -70,6 +70,10 @@ func main() {
 		}
 	}
 
+	if !strings.Contains(sourceURL, "://") {
+		sourceURL = "http://" + sourceURL
+	}
+
 	src, err := url.Parse(sourceURL)
 	if err != nil {
 		log.Fatalln("invalid --source URL:", err)
