@@ -31,6 +31,7 @@ const hook = `
 var (
 	sourceURL        = "http://localhost:8081"
 	targetAddr       = "localhost:8080"
+	fileServerAddr   = ""
 	gitignoreFile    = ".gitignore"
 	includeDir       = "."
 	excludeDirs      = []string{"./.git", "./.direnv", "./vendor", "*.tmpl"}
@@ -53,6 +54,7 @@ func main() {
 	pflag.StringSliceVarP(&excludeDirs, "exclude", "x", excludeDirs, "exclude directories/paths/globs")
 	pflag.StringVarP(&sourceURL, "source", "s", sourceURL, "source URL of the upstream server")
 	pflag.StringVarP(&targetAddr, "target", "t", targetAddr, "target address to listen on")
+	pflag.StringVarP(&fileServerAddr, "file-server", "F", fileServerAddr, "file server address to listen on, empty to disable")
 	pflag.StringVar(&gitignoreFile, "gitignore", gitignoreFile, "gitignore file to use, empty to disable")
 	pflag.StringVar(&generateCheckCmd, "generated-check", generateCheckCmd, "command to check if a file is generated, executes $SHELL or /bin/sh otherwise")
 	pflag.BoolVar(&noBrowser, "no-browser", noBrowser, "do not open browser")
@@ -68,6 +70,11 @@ func main() {
 		if err := checkValidExclude(excl); err != nil {
 			log.Fatalln("invalid --exclude:", err)
 		}
+	}
+
+	if fileServerAddr != "" && sourceURL != "" {
+		log.Println("warning: --file-server is enabled, --source will be ignored")
+		sourceURL = fileServerAddr
 	}
 
 	if !strings.Contains(sourceURL, "://") {
@@ -96,6 +103,14 @@ func main() {
 	wg.Go(func() error {
 		return observer.Start(ctx)
 	})
+
+	if fileServerAddr != "" {
+		wg.Go(func() error {
+			fs := http.FileServer(http.Dir(includeDir))
+			log.Println("file server is listening on", fileServerAddr)
+			return hserve.ListenAndServe(ctx, fileServerAddr, fs)
+		})
+	}
 
 	runner := NewCommandRunner(pflag.Args())
 	wg.Go(func() error {
