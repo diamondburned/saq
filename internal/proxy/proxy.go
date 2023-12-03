@@ -56,6 +56,7 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cWriter := rp.cookieInterceptor.NewWriter(w)
 		htmlMut := rp.htmlMutator.NewWriter(cWriter)
 		r.Host = rp.targetURL.Host
+		r.Header.Del("Accept-Encoding") // don't deal with compression
 
 		rp.ReverseProxy.ServeHTTP(htmlMut, r)
 
