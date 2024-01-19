@@ -58,12 +58,46 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Host = rp.targetURL.Host
 		r.Header.Del("Accept-Encoding") // don't deal with compression
 
-		rp.ReverseProxy.ServeHTTP(htmlMut, r)
+		maybeMutate := &maybeMutateHTML{
+			HTMLMutatorWriter: htmlMut,
+			bypass:            cWriter,
+		}
 
-		if err := htmlMut.ApplyHTML(); err != nil {
-			writeBigError(w, err)
+		rp.ReverseProxy.ServeHTTP(maybeMutate, r)
+
+		if maybeMutate.isHTML == 1 {
+			if err := htmlMut.ApplyHTML(); err != nil {
+				writeBigError(w, err)
+			}
 		}
 	default:
 		rp.ReverseProxy.ServeHTTP(w, r)
+	}
+}
+
+type maybeMutateHTML struct {
+	*proxy.HTMLMutatorWriter
+	bypass http.ResponseWriter
+	isHTML int
+}
+
+var _ http.ResponseWriter = (*maybeMutateHTML)(nil)
+
+func (m *maybeMutateHTML) Write(b []byte) (int, error) {
+	if m.isHTML == 0 {
+		contentType := m.Header().Get("Content-Type")
+		if contentType == "" || strings.HasPrefix(contentType, "text/html") {
+			m.isHTML = 1
+		} else {
+			m.isHTML = -1
+		}
+	}
+	switch m.isHTML {
+	case 1:
+		return m.HTMLMutatorWriter.Write(b)
+	case -1:
+		return m.bypass.Write(b)
+	default:
+		panic("unreachable")
 	}
 }
