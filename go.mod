@@ -2,8 +2,6 @@ module libdb.so/saq
 
 go 1.20
 
-replace github.com/fsnotify/fsnotify => github.com/fsnotify/fsnotify v1.6.1-0.20230120163138-c7cf79d65078
-
 require (
 	github.com/diamondburned/ghproxy v0.0.0-20201025235419-194be0dfdd7b
 	github.com/illarion/gonotify/v2 v2.0.0
