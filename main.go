@@ -109,14 +109,6 @@ func main() {
 		return observer.Start(ctx)
 	})
 
-	if fileServerAddr != "" {
-		wg.Go(func() error {
-			fs := http.FileServer(http.Dir(includeDir))
-			log.Println("file server is listening on", fileServerAddr)
-			return hserve.ListenAndServe(ctx, fileServerAddr, fs)
-		})
-	}
-
 	var runner Runner
 	if len(pflag.Args()) == 0 {
 		runner = NewNoopRunner()
@@ -126,6 +118,14 @@ func main() {
 			return cmdRunner.Start(ctx)
 		})
 		runner = cmdRunner
+	}
+
+	if fileServerAddr != "" {
+		wg.Go(func() error {
+			fs := http.FileServer(http.Dir(includeDir))
+			log.Println("file server is listening on", fileServerAddr)
+			return hserve.ListenAndServe(ctx, fileServerAddr, fs)
+		})
 	}
 
 	serverMon := NewHTTPMonitor(sourceURL)
@@ -145,8 +145,10 @@ func main() {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-observeCh:
+				log.Println("observer detected changes, restarting runner")
 				runner.Restart()
 			case <-runnerCh:
+				log.Println("runner restarted, monitoring server until it's alive")
 				serverMon.RefreshUntilState(ctx, HTTPStateAlive)
 			}
 		}

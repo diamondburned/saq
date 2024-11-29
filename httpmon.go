@@ -106,7 +106,7 @@ func (m *HTTPMonitor) pingHTTPUntilState(ctx context.Context, addr string, until
 
 		var state HTTPState
 
-		r, err := http.Head(sourceURL)
+		r, err := http.Head(addr)
 		if err == nil {
 			r.Body.Close()
 
@@ -119,7 +119,7 @@ func (m *HTTPMonitor) pingHTTPUntilState(ctx context.Context, addr string, until
 
 		m.publish(state)
 		if state == until {
-			log.Println("source server is", state)
+			log.Println("source server is now actually", state)
 			return nil
 		}
 

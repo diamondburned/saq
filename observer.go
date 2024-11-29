@@ -75,6 +75,8 @@ eventLoop:
 				return fmt.Errorf("watcher closed")
 			}
 
+			log.Println("file reloaded:", ev)
+
 			if ignore != nil && ignore.MatchesPath(ev.Name) {
 				continue
 			}
@@ -99,11 +101,14 @@ eventLoop:
 			if v, ok := o.generatedIndex.Load(ev.Name); ok {
 				generated = v.(bool)
 				if !generated {
-					log.Printf("included %q because it is not generated (cached)", ev)
+					log.Printf("included %q because it is not generated (cached)", ev.Name)
 				}
 			} else {
 				generated = o.fileIsGenerated(ctx, ev.Name)
 				o.generatedIndex.Store(ev.Name, generated)
+				if !generated {
+					log.Printf("included %q because it is not generated", ev.Name)
+				}
 			}
 
 			if generated {
@@ -111,7 +116,6 @@ eventLoop:
 				continue
 			}
 
-			log.Println("file reloaded:", ev)
 			o.pubsub.Publish(struct{}{})
 		}
 	}

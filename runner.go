@@ -36,7 +36,7 @@ func NewNoopRunner() *NoopRunner {
 
 // Restart signals the no-op runner to restart.
 func (r *NoopRunner) Restart() {
-	r.pubsub.Publish(struct{}{})
+	go r.pubsub.Publish(struct{}{})
 }
 
 // CommandRunner is a command runner. It maintains a running command in the
