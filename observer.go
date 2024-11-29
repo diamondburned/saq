@@ -54,7 +54,7 @@ func (o *Observer) Start(ctx context.Context) error {
 	var ignore *gitignore.GitIgnore
 	if o.obs.Gitignore != "" {
 		ignore, err = gitignore.CompileIgnoreFile(o.obs.Gitignore)
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to compile .gitignore: %v", err)
 		}
 	}
