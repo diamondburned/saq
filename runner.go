@@ -9,6 +9,36 @@ import (
 	"time"
 )
 
+// Runner is a runner.
+type Runner interface {
+	Subscriber[struct{}]
+	// Restart signals the runner to restart.
+	// After the runner has restarted the command, a signal should be emitted to
+	// the Subscriber instance.
+	Restart()
+}
+
+// NoopRunner is a no-op runner. It doesn't run any command but can fully
+// emulate the behavior of a forever-blocking command.
+type NoopRunner struct {
+	Subscriber[struct{}]
+	pubsub *Pubsub[struct{}]
+}
+
+// NewNoopRunner creates a new no-op runner.
+func NewNoopRunner() *NoopRunner {
+	pubsub := NewPubsub[struct{}]()
+	return &NoopRunner{
+		Subscriber: pubsub,
+		pubsub:     pubsub,
+	}
+}
+
+// Restart signals the no-op runner to restart.
+func (r *NoopRunner) Restart() {
+	r.pubsub.Publish(struct{}{})
+}
+
 // CommandRunner is a command runner. It maintains a running command in the
 // background.
 type CommandRunner struct {

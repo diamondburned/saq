@@ -63,7 +63,7 @@ func main() {
 	pflag.BoolVarP(&verbose, "verbose", "v", verbose, "verbose logging")
 	pflag.Parse()
 
-	if pflag.NArg() == 0 {
+	if len(os.Args) < 2 {
 		pflag.Usage()
 		os.Exit(1)
 	}
@@ -117,10 +117,16 @@ func main() {
 		})
 	}
 
-	runner := NewCommandRunner(pflag.Args())
-	wg.Go(func() error {
-		return runner.Start(ctx)
-	})
+	var runner Runner
+	if len(pflag.Args()) == 0 {
+		runner = NewNoopRunner()
+	} else {
+		cmdRunner := NewCommandRunner(pflag.Args())
+		wg.Go(func() error {
+			return cmdRunner.Start(ctx)
+		})
+		runner = cmdRunner
+	}
 
 	serverMon := NewHTTPMonitor(sourceURL)
 	wg.Go(func() error {
