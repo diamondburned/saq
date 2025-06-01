@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -91,6 +92,7 @@ func (s *CommandRunner) Start(ctx context.Context) error {
 		cmd = exec.Command(s.args[0], s.args[1:]...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("failed to start process: %w", err)
@@ -131,7 +133,7 @@ func stopCommand(cmd *exec.Cmd) {
 	case <-wait:
 		return
 	default:
-		cmd.Process.Signal(os.Interrupt)
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
 		log.Println("sent SIGINT, waiting 2s")
 	}
 
@@ -141,7 +143,7 @@ func stopCommand(cmd *exec.Cmd) {
 	select {
 	case <-timer.C:
 		log.Println("timeout waiting for process to exit, killing...")
-		cmd.Process.Kill()
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	case <-wait:
 		log.Println("process exited")
 		return
